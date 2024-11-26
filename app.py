@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 import requests
 from flask import Flask, jsonify, render_template, request
 import json
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -10,11 +12,8 @@ with open("settings.json") as f:
     settings = json.load(f)
 
 ASANA_API_KEY = settings["asana_api_key"]
-
-# Asana API Base URL
 ASANA_BASE_URL = "https://app.asana.com/api/1.0"
 
-# Headers for API authentication
 headers = {
     "Authorization": f"Bearer {ASANA_API_KEY}",
     "Content-Type": "application/json"
@@ -36,27 +35,26 @@ def get_projects_with_tasks():
         project_id = project["gid"]
         project_name = project["name"]
 
-        # Fetch tasks for the current project
-        tasks_url = f"{ASANA_BASE_URL}/projects/{project_id}/tasks"
+        # Fetch tasks with custom fields
+        tasks_url = f"{ASANA_BASE_URL}/projects/{project_id}/tasks?opt_fields=name,due_on,custom_fields"
         tasks_response = requests.get(tasks_url, headers=headers)
 
         if tasks_response.status_code == 200:
             tasks = tasks_response.json()["data"]
 
-            # Fetch task details including due dates and priorities
             detailed_tasks = []
             for task in tasks:
-                task_details_url = f"{ASANA_BASE_URL}/tasks/{task['gid']}"
-                task_details_response = requests.get(task_details_url, headers=headers)
+                priority = "low"  # Default to low priority
+                for field in task.get("custom_fields", []):
+                    if field["name"].lower() == "priority":  # Match the priority custom field
+                        priority = field.get("display_value", "low").lower()
 
-                if task_details_response.status_code == 200:
-                    task_details = task_details_response.json()["data"]
-                    detailed_tasks.append({
-                        "id": task_details["gid"],
-                        "name": task_details["name"],
-                        "due_date": task_details.get("due_on", "No Due Date"),
-                        "priority": task_details.get("priority", "low")
-                    })
+                detailed_tasks.append({
+                    "id": task["gid"],
+                    "name": task["name"],
+                    "due_date": task.get("due_on", "No Due Date"),
+                    "priority": priority
+                })
 
             projects_with_tasks.append({
                 "id": project_id,
@@ -66,91 +64,94 @@ def get_projects_with_tasks():
 
     return jsonify(projects_with_tasks)
 
-# Route to update due date and dependent tasks
+
+# Route to update due date dynamically based on priority
 @app.route("/update_due_date/<task_id>", methods=["POST"])
-def update_due_date_with_priority(task_id):
-    # Get the priority from the request data (we don't need the due date)
+def update_due_date(task_id):
     data = request.json
-    priority = data.get("priority")  # Priority should be passed
+    priority = data.get("priority", "low").lower()  # Default to low if no priority provided
 
-    if not priority:
-        return jsonify({"error": "Priority not provided"}), 400
-
-    # Get today's date and calculate the new due date
     today = datetime.today()
-
     if priority == "high":
-        new_due_date = add_days(today, 2)  # High priority: 2 days
+        new_due_date = add_days(today, 2)
     elif priority == "medium":
-        new_due_date = add_days(today, 7)  # Medium priority: 7 days
-    elif priority == "low":
-        new_due_date = add_days(today, 14)  # Low priority: 14 days
+        new_due_date = add_days(today, 7)
     else:
-        return jsonify({"error": "Invalid priority provided"}), 400
+        new_due_date = add_days(today, 14)
 
-    # Update the task's due date
     task_url = f"{ASANA_BASE_URL}/tasks/{task_id}"
-    payload = {"data": {"due_on": new_due_date, "priority": priority}}
+    payload = {"data": {"due_on": new_due_date}}
     response = requests.put(task_url, headers=headers, json=payload)
 
     if response.status_code != 200:
         return jsonify({"error": "Unable to update due date", "details": response.json()}), 400
 
-    # Fetch the project and other tasks in the project
-    task_details_url = f"{ASANA_BASE_URL}/tasks/{task_id}"
-    task_details_response = requests.get(task_details_url, headers=headers)
-
-    if task_details_response.status_code == 200:
-        task_details = task_details_response.json()["data"]
-        project_id = task_details["projects"][0]["gid"]
-
-        tasks_url = f"{ASANA_BASE_URL}/projects/{project_id}/tasks"
-        tasks_response = requests.get(tasks_url, headers=headers)
-
-        if tasks_response.status_code != 200:
-            return jsonify({"error": "Unable to fetch tasks in project"}), 400
-
-        tasks = tasks_response.json()["data"]
-
-        # Update medium and low-priority tasks based on high-priority task's new due date
-        for task in tasks:
-            task_details_url = f"{ASANA_BASE_URL}/tasks/{task['gid']}"
-            task_details_response = requests.get(task_details_url, headers=headers)
-
-            if task_details_response.status_code == 200:
-                task_details = task_details_response.json()["data"]
-                task_priority = task_details.get("priority", "low")  # Default to low if no priority set
-
-                if priority == "high" and task_priority == "medium":
-                    new_due_date = add_days(new_due_date, 7)
-                    update_task_due_date(task_details_url, new_due_date)
-                elif priority in ["high", "medium"] and task_priority == "low":
-                    new_due_date = add_days(new_due_date, 14)
-                    update_task_due_date(task_details_url, new_due_date)
-
     return jsonify({"message": "Due date updated successfully"})
 
-# Function to update task due date
-def update_task_due_date(task_url, new_due_date):
-    payload = {"data": {"due_on": new_due_date}}
-    requests.put(task_url, headers=headers, json=payload)
 
-# Function to add days to a given due date and skip Sundays
+# Background task to update all tasks' due dates periodically
+def update_task_due_dates():
+    while True:
+        print("Running periodic task update...")
+        projects_response = requests.get(f"{ASANA_BASE_URL}/projects", headers=headers)
+
+        if projects_response.status_code == 200:
+            projects = projects_response.json()["data"]
+            for project in projects:
+                project_id = project["gid"]
+                tasks_url = f"{ASANA_BASE_URL}/projects/{project_id}/tasks?opt_fields=name,custom_fields"
+                tasks_response = requests.get(tasks_url, headers=headers)
+
+                if tasks_response.status_code == 200:
+                    tasks = tasks_response.json()["data"]
+                    for task in tasks:
+                        task_id = task["gid"]
+                        priority = "low"  # Default to low
+                        for field in task.get("custom_fields", []):
+                            if field["name"].lower() == "priority":
+                                priority = field.get("display_value", "low").lower()
+
+                        # Assign due dates dynamically based on priority
+                        today = datetime.today()
+                        if priority == "high":
+                            new_due_date = add_days(today, 2)
+                        elif priority == "medium":
+                            new_due_date = add_days(today, 7)
+                        else:
+                            new_due_date = add_days(today, 14)
+
+                        task_url = f"{ASANA_BASE_URL}/tasks/{task_id}"
+                        payload = {"data": {"due_on": new_due_date}}
+                        requests.put(task_url, headers=headers, json=payload)
+
+        time.sleep(60)
+
+
+# Function to add days and skip Sundays
 def add_days(start_date, days_to_add):
     new_due_date = start_date + timedelta(days=days_to_add)
     return skip_sundays(new_due_date).strftime("%Y-%m-%d")
 
-# Function to skip Sundays
+
 def skip_sundays(due_date):
-    while due_date.weekday() == 6:  # 6 is Sunday
+    while due_date.weekday() == 6:  # Sunday
         due_date += timedelta(days=1)
     return due_date
 
-# Route to render projects and tasks on the web interface
+
+# Start background task
+def start_background_task():
+    thread = threading.Thread(target=update_task_due_dates)
+    thread.daemon = True
+    thread.start()
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
+
+start_background_task()
 
 if __name__ == "__main__":
     app.run(debug=True)

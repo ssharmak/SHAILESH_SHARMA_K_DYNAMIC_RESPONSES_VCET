@@ -3,114 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Asana Projects and Tasks</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 20px;
-      }
-      .project {
-        margin-bottom: 20px;
-      }
-      .project-title {
-        font-size: 18px;
-        font-weight: bold;
-      }
-      .task {
-        margin-left: 20px;
-      }
-      .task-due-date {
-        color: gray;
-        font-size: 14px;
-      }
-      .update-due-date {
-        margin-top: 5px;
-      }
-      .priority-select {
-        margin-top: 5px;
-      }
-    </style>
+    <title>Task List</title>
   </head>
   <body>
-    <h1>Asana Projects and Tasks</h1>
-    <div id="projects-container"></div>
-
-    <script>
-      // Fetch and display projects with tasks
-      async function loadProjectsWithTasks() {
-        const response = await fetch("/projects_with_tasks");
-        const projects = await response.json();
-
-        const projectsContainer = document.getElementById("projects-container");
-        projectsContainer.innerHTML = projects
-          .map((project) => {
-            const tasks = project.tasks
-              .map(
-                (task) => `
-                    <div class="task">
-                        <div>Task: ${task.name}</div>
-                        <div class="task-due-date">Due Date: ${
-                          task.due_date
-                        }</div>
-
-                        <!-- Dropdown to select priority -->
-                        <div class="priority-select">
-                            <label for="priority">Priority: </label>
-                            <select id="priority-${task.id}" name="priority">
-                                <option value="high" ${
-                                  task.priority === "high" ? "selected" : ""
-                                }>High</option>
-                                <option value="medium" ${
-                                  task.priority === "medium" ? "selected" : ""
-                                }>Medium</option>
-                                <option value="low" ${
-                                  task.priority === "low" ? "selected" : ""
-                                }>Low</option>
-                            </select>
-                        </div>
-
-                        <!-- Button for updating due date -->
-                        <div class="update-due-date">
-                            <button onclick="updateDueDate('${
-                              task.id
-                            }')">Update Due Date</button>
-                        </div>
-                    </div>
-                `
-              )
-              .join("");
-
-            return `
-                    <div class="project">
-                        <div class="project-title">Project: ${
-                          project.name
-                        }</div>
-                        ${tasks || "<div class='task'>No tasks found.</div>"}
-                    </div>
-                `;
-          })
-          .join("");
-      }
-
-      // Function to update the due date of a task
-      async function updateDueDate(taskId) {
-        const priority = document.getElementById(`priority-${taskId}`).value;
-
-        const response = await fetch(`/update_due_date/${taskId}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ priority }),
-        });
-
-        const result = await response.json();
-        alert(result.message || result.error);
-        loadProjectsWithTasks(); // Reload tasks after update
-      }
-
-      // Load projects on page load
-      loadProjectsWithTasks();
-    </script>
+    <h1>Task List</h1>
+    {% for project in projects_with_tasks %}
+    <h2>Project ID: {{ project.id }} | Project Name: {{ project.name }}</h2>
+    <ul>
+      {% for task in project.tasks %}
+      <li>
+        Task ID: {{ task.id }} | Task Name: {{ task.name }} | Priority: {{
+        task.priority }} | Due Date: {{ task.due_date }} | Section: {{
+        task.section }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
   </body>
 </html>
