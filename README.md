@@ -22,3 +22,7 @@ Clone the repository to your local machine.
 ```bash
 git clone <repository_url>
 cd <repository_name>
+
+### 2. Run the file
+
+python -m src.main
