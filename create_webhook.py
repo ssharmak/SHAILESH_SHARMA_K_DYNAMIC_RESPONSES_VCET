@@ -7,7 +7,7 @@ def create_webhook():
     payload = {
         "data": {
             "resource": project_id,
-            "target": "https://Shailesh-Sharma-K-dynamic-deadline.onrender.com/webhook"
+            "target": "https://shailesh-sharma-k-dynamic-responses-vcet.onrender.com"
         }
     }
     response = requests.post(url, json=payload, headers=HEADERS)
