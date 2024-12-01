@@ -22,3 +22,13 @@ Clone the repository to your local machine.
 ```bash
 git clone <repository_url>
 cd <repository_name>
+```
+### 2. Run the application
+```bash
+python app.py
+python create_workbook.py
+```
+Run the commands in seperate terminals of project folder
+
+### 3. Next Steps
+Now open the Asana webiste and create task and assign the priority. Then move the tasks to In Progress and Compledted section.
